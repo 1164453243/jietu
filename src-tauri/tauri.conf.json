@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "截图",
+  "version": "0.1.0",
+  "identifier": "com.king.jietu",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "截图工具",
+        "width": 360,
+        "height": 240,
+        "resizable": false,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "macOSPrivateApi": true,
+    "trayIcon": {
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": true,
+      "menuOnLeftClick": false,
+      "tooltip": "截图工具"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null,
+      "infoPlist": null
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for all jietu windows",
+  "windows": ["main", "overlay", "editor", "settings"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered",
+    "fs:allow-write-file",
+    "fs:allow-read-file",
+    "fs:allow-exists",
+    "clipboard-manager:allow-write-image",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text",
+    "dialog:allow-save",
+    "dialog:allow-open"
+  ]
+}

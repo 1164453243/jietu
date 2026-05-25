@@ -1,0 +1,159 @@
+.editor-root {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background: #1e1e1e;
+  overflow: hidden;
+}
+
+/* ── Toolbar ─────────────────────────────────────── */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #3a3a3a;
+  margin: 0 4px;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.tool-btn {
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #ccc;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.tool-btn:hover { background: #383838; color: #fff; }
+.tool-btn.active { background: #0a84ff22; border-color: #0a84ff; color: #0a84ff; }
+
+.color-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+}
+.color-btn:hover { transform: scale(1.2); }
+.color-btn.active { border-color: #fff; transform: scale(1.2); }
+
+.stroke-btn {
+  width: 32px;
+  height: 28px;
+  border: 1.5px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+.stroke-btn:hover { background: #383838; }
+.stroke-btn.active { border-color: #0a84ff; background: #0a84ff22; }
+.stroke-preview {
+  width: 22px;
+  background: #ccc;
+  border-radius: 2px;
+}
+
+.action-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 1.5px solid #3a3a3a;
+  border-radius: 5px;
+  background: transparent;
+  color: #ccc;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.action-btn:hover { background: #383838; color: #fff; border-color: #555; }
+.copy-btn { color: #fff; background: #0a84ff; border-color: #0a84ff; }
+.copy-btn:hover { background: #0a6fdf; }
+.save-btn { color: #fff; background: #30d158; border-color: #30d158; }
+.save-btn:hover { background: #28b84a; }
+.pin-btn { color: #fff; background: #5856d6; border-color: #5856d6; }
+.pin-btn:hover { background: #4a49c0; }
+.close-btn:hover { background: #ff3b3044; border-color: #ff3b30; color: #ff3b30; }
+
+/* ── Canvas area ─────────────────────────────────── */
+.editor-canvas-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 16px;
+  position: relative;
+}
+
+.editor-canvas-area canvas {
+  box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 80px);
+}
+
+.editor-loading {
+  color: #666;
+  font-size: 14px;
+}
+
+.text-input-overlay {
+  position: absolute;
+  background: rgba(255,255,255,0.9);
+  border: 2px solid #0a84ff;
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 15px;
+  outline: none;
+  min-width: 120px;
+  transform: translate(-50%, 0);
+  z-index: 10;
+}
+
+.editor-flash {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 20px;
+  pointer-events: none;
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
