@@ -1,11 +1,11 @@
 use std::sync::Mutex;
 use base64::{Engine as _, engine::general_purpose};
-use image::GenericImageView;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_opener::OpenerExt;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +13,22 @@ pub struct AppState {
     pub screen_snapshot: Mutex<Option<ScreenSnapshot>>,
     pub capture_data: Mutex<Option<String>>,
     pub hotkey_config: Mutex<HotkeyConfig>,
+    pub preselect_all: Mutex<bool>,
+    pub window_list: Mutex<Vec<WindowInfo>>,
+    pub settings: Mutex<AppSettings>,
+    pub screenshot_history: Mutex<Vec<ScreenshotRecord>>,
+}
+
+/// A visible on-screen window, with bounds in logical (CSS) pixels,
+/// top-left origin matching the overlay coordinate system.
+#[derive(serde::Serialize, Clone)]
+pub struct WindowInfo {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub title: String,
+    pub app_name: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -40,9 +56,161 @@ impl Default for HotkeyConfig {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct AppSettings {
+    pub save_path: String,    // "" = prompt every time
+    pub format: String,       // "png" | "jpg"
+    pub auto_save: bool,
+    pub keep_history: bool,
+    pub history_limit: u32,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        AppSettings {
+            save_path: String::new(),
+            format: "png".into(),
+            auto_save: false,
+            keep_history: true,
+            history_limit: 30,
+        }
+    }
+}
+
+/// One entry in screenshot history. `thumb` is a 160-px-wide JPEG thumbnail (base64).
+/// Full-resolution screenshots are cached separately in `app_data_dir/history/<id>.png`.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct ScreenshotRecord {
+    pub id: String,
+    pub created_at: u64,   // Unix timestamp (seconds)
+    pub width: u32,
+    pub height: u32,
+    pub thumb: String,     // base64 JPEG thumbnail (~160 px wide)
+    pub file_path: String, // path if auto-saved, otherwise ""
+}
+
+// ── macOS: raise overlay window above Dock ────────────────────────────────────
+
+/// On macOS, always_on_top(true) only reaches NSFloatingWindowLevel (3), which is
+/// below the Dock (NSWindowLevel 20) and menu bar (24). The Dock therefore renders
+/// on top of our overlay and intercepts mouse events in that area.
+/// Fix: after window creation, use the ObjC runtime to raise the level to
+/// NSScreenSaverWindowLevel (1000), making the overlay appear above everything.
+#[cfg(target_os = "macos")]
+fn raise_overlay_window_level(window: &tauri::WebviewWindow) {
+    use objc::{msg_send, sel, sel_impl, runtime::Object};
+    let ptr = match window.ns_window() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let ns_win = ptr as *mut Object;
+    if ns_win.is_null() { return; }
+    unsafe {
+        // NSScreenSaverWindowLevel = 1000 — above Dock (20) and menu bar (24)
+        let _: () = msg_send![ns_win, setLevel: 1000_i64];
+        // NSWindowCollectionBehaviorCanJoinAllSpaces(1) | Transient(4) | IgnoresCycle(64)
+        let _: () = msg_send![ns_win, setCollectionBehavior: 69_u64];
+    }
+}
+
+// ── macOS screen-capture permission ──────────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+fn has_screen_capture_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    { unsafe { CGPreflightScreenCaptureAccess() } }
+    #[cfg(not(target_os = "macos"))]
+    { true }
+}
+
+#[tauri::command]
+fn check_screen_capture_permission() -> bool {
+    has_screen_capture_permission()
+}
+
+#[tauri::command]
+async fn request_screen_capture_permission(app: AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let granted = unsafe { CGRequestScreenCaptureAccess() };
+        if !granted {
+            // Open System Settings > Privacy & Security > Screen Recording
+            let _ = app.opener().open_url(
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+                None::<&str>,
+            );
+        }
+        granted
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = app; true }
+}
+
 // ── Screenshot helpers ────────────────────────────────────────────────────────
 
 fn capture_primary_monitor() -> Result<ScreenSnapshot, String> {
+    #[cfg(target_os = "macos")]
+    {
+        capture_macos_screencapture()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        capture_xcap()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn capture_macos_screencapture() -> Result<ScreenSnapshot, String> {
+    use std::process::Command;
+
+    // Use a temp file path unique to this process to avoid races
+    let tmp = format!("/tmp/jietu_snap_{}.png", std::process::id());
+
+    // -x: no sounds, -D 1: main display (display 1)
+    let status = Command::new("screencapture")
+        .args(["-x", "-D", "1", &tmp])
+        .status()
+        .map_err(|e| format!("screencapture failed: {}", e))?;
+    if !status.success() {
+        return Err(format!("screencapture exited with {}", status));
+    }
+
+    let png_bytes = std::fs::read(&tmp).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&tmp);
+
+    let dynamic = image::load_from_memory(&png_bytes).map_err(|e| e.to_string())?;
+    let pw = dynamic.width();
+    let ph = dynamic.height();
+
+    let scale = {
+        let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
+        monitors.iter()
+            .find(|m| m.is_primary().unwrap_or(false))
+            .map(|m| m.scale_factor().unwrap_or(1.0) as f64)
+            .unwrap_or(2.0)
+    };
+
+    let mut buf = Vec::new();
+    dynamic.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+        .map_err(|e| e.to_string())?;
+
+    Ok(ScreenSnapshot {
+        data: general_purpose::STANDARD.encode(&buf),
+        width: pw,
+        height: ph,
+        x: 0,
+        y: 0,
+        scale,
+    })
+}
+
+#[allow(dead_code)]
+fn capture_xcap() -> Result<ScreenSnapshot, String> {
     let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
     let monitor = monitors
         .into_iter()
@@ -73,16 +241,19 @@ fn capture_primary_monitor() -> Result<ScreenSnapshot, String> {
     })
 }
 
+/// x, y, w, h are canvas-relative LOGICAL pixel coords from the overlay window.
+/// The overlay window covers the monitor exactly, so (0,0) == monitor physical (0,0).
+/// Convert to physical by multiplying by scale_factor.
 fn crop_snapshot(snapshot: &ScreenSnapshot, x: i32, y: i32, w: u32, h: u32) -> Result<String, String> {
     let bytes = general_purpose::STANDARD
         .decode(&snapshot.data)
         .map_err(|e| e.to_string())?;
     let dynamic = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
 
-    let px = ((x - snapshot.x) as f64 * snapshot.scale).max(0.0) as u32;
-    let py = ((y - snapshot.y) as f64 * snapshot.scale).max(0.0) as u32;
-    let pw = ((w as f64) * snapshot.scale) as u32;
-    let ph = ((h as f64) * snapshot.scale) as u32;
+    let px = ((x as f64) * snapshot.scale).max(0.0) as u32;
+    let py = ((y as f64) * snapshot.scale).max(0.0) as u32;
+    let pw = ((w as f64) * snapshot.scale).max(1.0) as u32;
+    let ph = ((h as f64) * snapshot.scale).max(1.0) as u32;
 
     let px = px.min(dynamic.width().saturating_sub(1));
     let py = py.min(dynamic.height().saturating_sub(1));
@@ -107,7 +278,14 @@ fn close_window(app: &AppHandle, label: &str) {
 }
 
 fn open_overlay_window(app: &AppHandle, snapshot: &ScreenSnapshot) -> Result<(), String> {
-    close_window(app, "overlay");
+    // Destroy any existing overlay before creating a new one.
+    // close() is async; hide first so it's invisible, then close.
+    if let Some(existing) = app.get_webview_window("overlay") {
+        let _ = existing.hide();
+        let _ = existing.destroy();
+    }
+
+    // Use logical pixels for Tauri window sizing (physical / scale = logical)
     let lw = snapshot.width as f64 / snapshot.scale;
     let lh = snapshot.height as f64 / snapshot.scale;
     let lx = snapshot.x as f64;
@@ -124,7 +302,12 @@ fn open_overlay_window(app: &AppHandle, snapshot: &ScreenSnapshot) -> Result<(),
         .build()
         .map_err(|e| e.to_string())?;
 
+    // macOS: put the overlay above the Dock so the Dock area can be selected
+    #[cfg(target_os = "macos")]
+    raise_overlay_window_level(&w);
+
     w.show().map_err(|e| e.to_string())?;
+    w.set_focus().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -142,23 +325,268 @@ fn open_editor_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ── Window list ───────────────────────────────────────────────────────────────
+
+/// Collect metadata for all visible on-screen windows.
+/// On macOS, xcap returns bounds via CGWindowListCopyWindowInfo in logical pixels
+/// (screen points) with a top-left origin — the same system as CSS pixels in the
+/// overlay — so no coordinate conversion is needed.
+fn collect_window_list() -> Vec<WindowInfo> {
+    xcap::Window::all()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|w| !w.is_minimized().unwrap_or(true))
+        .filter_map(|w| {
+            let width  = w.width().ok()?;
+            let height = w.height().ok()?;
+            if width == 0 || height == 0 { return None; }
+            Some(WindowInfo {
+                x:        w.x().ok()?,
+                y:        w.y().ok()?,
+                width,
+                height,
+                title:    w.title().unwrap_or_default(),
+                app_name: w.app_name().unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn get_window_list(state: State<'_, AppState>) -> Vec<WindowInfo> {
+    state.window_list.lock().unwrap().clone()
+}
+
+// ── Commands: settings ────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_settings(state: State<'_, AppState>) -> AppSettings {
+    state.settings.lock().unwrap().clone()
+}
+
+#[tauri::command]
+async fn save_settings(app: AppHandle, state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
+    *state.settings.lock().unwrap() = settings.clone();
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        if let Ok(json) = serde_json::to_string(&settings) {
+            let _ = std::fs::write(dir.join("settings.json"), json);
+        }
+    }
+    Ok(())
+}
+
+// ── Commands: screenshot history ──────────────────────────────────────────────
+
+/// Save a screenshot to history. `data` is base64 PNG.
+/// Creates a 160-px thumbnail for display and caches the full image for later copy.
+#[tauri::command]
+async fn save_to_history(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    data: String,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let settings = state.settings.lock().unwrap().clone();
+    if !settings.keep_history { return Ok(()); }
+
+    let bytes = general_purpose::STANDARD.decode(&data).map_err(|e| e.to_string())?;
+
+    // Build thumbnail (160 px wide, JPEG)
+    let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+    let thumb_w = 160u32;
+    let thumb_h = (height as f64 * thumb_w as f64 / width.max(1) as f64).round() as u32;
+    let thumb = img.resize(thumb_w, thumb_h.max(1), image::imageops::FilterType::Triangle);
+    let mut thumb_buf = Vec::new();
+    thumb.write_to(&mut std::io::Cursor::new(&mut thumb_buf), image::ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    let thumb_b64 = general_purpose::STANDARD.encode(&thumb_buf);
+
+    // Create record
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let id = format!("shot_{now}_{:04}", (now % 10000));
+
+    // Cache full screenshot to disk
+    let mut file_path = String::new();
+    if let Ok(dir) = app.path().app_data_dir() {
+        let cache_dir = dir.join("history");
+        let _ = std::fs::create_dir_all(&cache_dir);
+        let cache_file = cache_dir.join(format!("{id}.png"));
+        if std::fs::write(&cache_file, &bytes).is_ok() {
+            file_path = cache_file.to_string_lossy().into_owned();
+        }
+    }
+
+    // Auto-save to user's save path if configured
+    if settings.auto_save && !settings.save_path.is_empty() {
+        let ts = chrono_now_string();
+        let ext = &settings.format;
+        let dest = std::path::Path::new(&settings.save_path)
+            .join(format!("截图_{ts}.{ext}"));
+        if ext == "jpg" {
+            // Re-encode as JPEG
+            let mut jpg_buf = Vec::new();
+            let _ = img.write_to(&mut std::io::Cursor::new(&mut jpg_buf), image::ImageFormat::Jpeg);
+            let _ = std::fs::write(&dest, jpg_buf);
+        } else {
+            let _ = std::fs::write(&dest, &bytes);
+        }
+        if file_path.is_empty() {
+            file_path = dest.to_string_lossy().into_owned();
+        }
+    }
+
+    let record = ScreenshotRecord { id, created_at: now, width, height, thumb: thumb_b64, file_path };
+
+    let mut history = state.screenshot_history.lock().unwrap();
+    history.insert(0, record.clone());
+    let limit = settings.history_limit as usize;
+    if history.len() > limit { history.truncate(limit); }
+    let snapshot = history.clone();
+    drop(history);
+
+    // Persist index
+    if let Ok(dir) = app.path().app_data_dir() {
+        if let Ok(json) = serde_json::to_string(&snapshot) {
+            let _ = std::fs::write(dir.join("history.json"), json);
+        }
+    }
+
+    // Notify all windows so they can refresh their history list immediately
+    let _ = app.emit("screenshot-saved", &record);
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_history_item(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let mut history = state.screenshot_history.lock().unwrap();
+    history.retain(|r| r.id != id);
+    let snapshot = history.clone();
+    drop(history);
+
+    // Remove cached full-res file
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::remove_file(dir.join("history").join(format!("{id}.png")));
+        if let Ok(json) = serde_json::to_string(&snapshot) {
+            let _ = std::fs::write(dir.join("history.json"), json);
+        }
+    }
+    let _ = app.emit("history-changed", ());
+    Ok(())
+}
+
+fn chrono_now_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let s = secs % 86400;
+    let h = s / 3600; let m = (s % 3600) / 60; let sec = s % 60;
+    // Use day-of-epoch as date approximation (good enough for file names)
+    let days = secs / 86400;
+    format!("{days:05}{h:02}{m:02}{sec:02}")
+}
+
+#[tauri::command]
+fn get_screenshot_history(state: State<'_, AppState>) -> Vec<ScreenshotRecord> {
+    state.screenshot_history.lock().unwrap().clone()
+}
+
+#[tauri::command]
+async fn copy_history_item(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let file_path = {
+        let history = state.screenshot_history.lock().unwrap();
+        history.iter().find(|r| r.id == id)
+            .map(|r| r.file_path.clone())
+            .ok_or("未找到截图")?
+    };
+
+    // Try to read from the cached file first; fall back to searching history cache dir
+    let path = if !file_path.is_empty() && std::path::Path::new(&file_path).exists() {
+        std::path::PathBuf::from(&file_path)
+    } else if let Ok(dir) = app.path().app_data_dir() {
+        dir.join("history").join(format!("{id}.png"))
+    } else {
+        return Err("找不到文件".into());
+    };
+
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+    let rgba = img.to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+
+    app.clipboard().write_image(
+        &tauri::image::Image::new(rgba.as_raw(), w, h)
+    ).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn clear_screenshot_history(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    {
+        let mut history = state.screenshot_history.lock().unwrap();
+        history.clear();
+    }
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::write(dir.join("history.json"), "[]");
+        // Remove cached full-res images
+        if let Ok(entries) = std::fs::read_dir(dir.join("history")) {
+            for e in entries.flatten() {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    Ok(())
+}
+
 // ── Commands: capture ─────────────────────────────────────────────────────────
 
 #[tauri::command]
 async fn start_region_capture(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !has_screen_capture_permission() {
+        return Err("no_permission".into());
+    }
+    // Hide main window so it doesn't appear in the screenshot
+    if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Capture window metadata and screenshot while screen is undisturbed
+    let windows  = collect_window_list();
     let snapshot = capture_primary_monitor()?;
+
+    *state.window_list.lock().unwrap()    = windows;
+    *state.screen_snapshot.lock().unwrap() = Some(snapshot.clone());
     open_overlay_window(&app, &snapshot)?;
-    *state.screen_snapshot.lock().unwrap() = Some(snapshot);
     Ok(())
 }
 
 #[tauri::command]
 async fn start_fullscreen_capture(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !has_screen_capture_permission() {
+        return Err("no_permission".into());
+    }
+    if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let windows  = collect_window_list();
     let snapshot = capture_primary_monitor()?;
-    *state.capture_data.lock().unwrap() = Some(snapshot.data.clone());
-    *state.screen_snapshot.lock().unwrap() = Some(snapshot);
-    open_editor_window(&app)?;
+
+    *state.window_list.lock().unwrap()    = windows;
+    *state.preselect_all.lock().unwrap()  = true;
+    *state.screen_snapshot.lock().unwrap() = Some(snapshot.clone());
+    open_overlay_window(&app, &snapshot)?;
     Ok(())
+}
+
+#[tauri::command]
+fn take_preselect_all(state: State<'_, AppState>) -> bool {
+    let mut lock = state.preselect_all.lock().unwrap();
+    let val = *lock;
+    *lock = false;
+    val
 }
 
 #[tauri::command]
@@ -170,8 +598,14 @@ async fn do_region_capture(
     width: u32,
     height: u32,
 ) -> Result<(), String> {
-    close_window(&app, "overlay");
-    std::thread::sleep(std::time::Duration::from_millis(80));
+    // Hide immediately so the overlay disappears the instant the user releases,
+    // preventing them from seeing a stale selection or accidentally starting
+    // another drag while the async close completes.
+    if let Some(w) = app.get_webview_window("overlay") {
+        let _ = w.hide();
+        let _ = w.close();
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let cropped = {
         let lock = state.screen_snapshot.lock().unwrap();
@@ -203,11 +637,62 @@ async fn close_overlay(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn save_image(path: String, data: String) -> Result<(), String> {
     let bytes = general_purpose::STANDARD.decode(&data).map_err(|e| e.to_string())?;
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    let lower = path.to_lowercase();
+    let out_bytes = if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+            .map_err(|e| e.to_string())?;
+        buf
+    } else {
+        bytes
+    };
+    std::fs::write(&path, out_bytes).map_err(|e| e.to_string())?;
     Ok(())
 }
 
+/// Crop the stored screen snapshot at full physical resolution (scale factor applied).
+/// Returns base64 PNG. Coordinates are in logical (CSS) pixels — same as the overlay canvas.
+#[tauri::command]
+fn crop_region(state: State<'_, AppState>, x: i32, y: i32, w: u32, h: u32) -> Result<String, String> {
+    let lock = state.screen_snapshot.lock().unwrap();
+    let snap = lock.as_ref().ok_or("No snapshot available")?;
+    crop_snapshot(snap, x, y, w, h)
+}
+
 // ── Commands: pin window ──────────────────────────────────────────────────────
+
+/// Copy a base64-encoded PNG directly to the clipboard.
+/// Used by the pin window's context menu where each pin owns its own image data.
+#[tauri::command]
+async fn copy_image_data(app: AppHandle, data: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let bytes = general_purpose::STANDARD.decode(&data).map_err(|e| e.to_string())?;
+    let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+    let rgba = img.to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+    app.clipboard().write_image(
+        &tauri::image::Image::new(rgba.as_raw(), w, h)
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Called from the overlay toolbar — stores the annotated image and opens a pin window.
+#[tauri::command]
+async fn pin_from_overlay(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    data: String,
+) -> Result<(), String> {
+    *state.capture_data.lock().unwrap() = Some(data);
+    // Close the overlay first, then open pin window
+    if let Some(w) = app.get_webview_window("overlay") {
+        let _ = w.hide();
+        let _ = w.close();
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    open_pin_window(app, state).await
+}
 
 #[tauri::command]
 async fn open_pin_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
@@ -254,7 +739,7 @@ async fn open_settings(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("index.html#settings".into()))
-        .inner_size(480.0, 400.0)
+        .inner_size(520.0, 480.0)
         .resizable(false)
         .center()
         .title("设置")
@@ -392,8 +877,23 @@ pub fn run() {
             screen_snapshot: Mutex::new(None),
             capture_data: Mutex::new(None),
             hotkey_config: Mutex::new(HotkeyConfig::default()),
+            preselect_all: Mutex::new(false),
+            window_list: Mutex::new(vec![]),
+            settings: Mutex::new(AppSettings::default()),
+            screenshot_history: Mutex::new(vec![]),
+        })
+        .on_window_event(|window, event| {
+            // Hide main window to tray instead of closing it
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
+            check_screen_capture_permission,
+            request_screen_capture_permission,
             start_region_capture,
             start_fullscreen_capture,
             do_region_capture,
@@ -401,11 +901,23 @@ pub fn run() {
             get_capture_data,
             close_overlay,
             save_image,
+            pin_from_overlay,
             open_pin_window,
             open_settings,
             get_hotkey_config,
             check_shortcut_conflict,
             save_hotkey_config,
+            take_preselect_all,
+            get_window_list,
+            get_settings,
+            save_settings,
+            save_to_history,
+            get_screenshot_history,
+            copy_history_item,
+            copy_image_data,
+            delete_history_item,
+            clear_screenshot_history,
+            crop_region,
         ])
         .setup(setup_app)
         .run(tauri::generate_context!())
@@ -425,8 +937,24 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     };
     *app.state::<AppState>().hotkey_config.lock().unwrap() = config.clone();
 
+    // Load persisted app settings
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&data_dir);
+        if let Some(settings) = std::fs::read_to_string(data_dir.join("settings.json"))
+            .ok().and_then(|s| serde_json::from_str::<AppSettings>(&s).ok()) {
+            *app.state::<AppState>().settings.lock().unwrap() = settings;
+        }
+        // Load history index
+        if let Some(history) = std::fs::read_to_string(data_dir.join("history.json"))
+            .ok().and_then(|s| serde_json::from_str::<Vec<ScreenshotRecord>>(&s).ok()) {
+            *app.state::<AppState>().screenshot_history.lock().unwrap() = history;
+        }
+    }
+
     // Register global hotkeys
-    register_shortcuts(app.handle(), &config)?;
+    if let Err(e) = register_shortcuts(app.handle(), &config) {
+        eprintln!("[jietu] hotkey register failed: {e}");
+    }
 
     // ── System Tray ───────────────────────────────────────────────────────────
     let region_item  = MenuItem::with_id(app, "region",     "区域截图", true, None::<&str>)?;
@@ -465,8 +993,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 _ => {}
             }
         })
-        .on_tray_icon_event(|_tray, event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {}
+        .on_tray_icon_event(move |tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                let app = tray.app_handle();
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
         })
         .build(app)?;
 

@@ -22,6 +22,10 @@
   height: 100%;
 }
 
+.overlay-ann {
+  pointer-events: auto;
+}
+
 .overlay-tooltip {
   position: fixed;
   background: rgba(0, 0, 0, 0.75);
@@ -31,7 +35,7 @@
   border-radius: 4px;
   pointer-events: none;
   white-space: nowrap;
-  z-index: 10;
+  z-index: 20;
 }
 
 .overlay-hint {
@@ -46,4 +50,153 @@
   border-radius: 20px;
   pointer-events: none;
   letter-spacing: 0.3px;
+  z-index: 20;
+}
+
+/* ── Floating annotation toolbar ─────────────── */
+.overlay-toolbar {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  background: rgba(28, 28, 28, 0.97);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: toolbar-in 0.1s ease forwards;
+}
+@keyframes toolbar-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.otb-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.otb-sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
+.otb-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #ccc;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+  padding: 0;
+  flex-shrink: 0;
+}
+.otb-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.otb-btn.active { background: rgba(24, 144, 255, 0.3); color: #60b8ff; }
+
+.otb-stroke-preview {
+  display: block;
+  width: 14px;
+  background: #ccc;
+  border-radius: 2px;
+}
+.otb-btn.active .otb-stroke-preview { background: #60b8ff; }
+
+.otb-color {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.otb-color:hover { transform: scale(1.15); }
+.otb-color.active { border-color: #fff; transform: scale(1.1); }
+
+.otb-pin { font-size: 14px; }
+
+.otb-copy {
+  width: auto;
+  padding: 0 9px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.otb-copy:hover { background: #0958d9; color: #fff; }
+
+.otb-save {
+  width: auto;
+  padding: 0 9px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+  font-size: 12px;
+}
+.otb-save:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+
+.otb-edit { font-size: 13px; }
+
+.otb-close { color: #aaa; }
+.otb-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+.otb-quit { color: #ff6b6b; }
+.otb-quit:hover { background: rgba(255, 59, 48, 0.2); color: #ff3b30; }
+
+/* Toast notification */
+.overlay-toast {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 13px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  pointer-events: none;
+  z-index: 40;
+  animation: toast-in 0.15s ease;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Stroke width dot */
+.otb-stroke-dot {
+  display: block;
+  border-radius: 50%;
+  background: #ccc;
+  flex-shrink: 0;
+}
+.otb-btn.active .otb-stroke-dot { background: #60b8ff; }
+
+/* Text input overlay */
+.overlay-text-input {
+  position: fixed;
+  z-index: 25;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid #1890ff;
+  outline: none;
+  color: #ff3b30;
+  font-size: 18px;
+  font-family: -apple-system, sans-serif;
+  min-width: 120px;
+  padding: 2px 0;
+  caret-color: #1890ff;
 }

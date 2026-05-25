@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for all jietu windows",
-  "windows": ["main", "overlay", "editor", "settings"],
+  "windows": ["main", "overlay", "editor", "settings", "pin_*"],
   "permissions": [
     "core:default",
     "opener:default",

@@ -14,11 +14,11 @@
       {
         "label": "main",
         "title": "截图工具",
-        "width": 360,
-        "height": 240,
+        "width": 400,
+        "height": 600,
         "resizable": false,
         "center": true,
-        "visible": false
+        "visible": true
       }
     ],
     "security": {

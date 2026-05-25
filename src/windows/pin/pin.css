@@ -45,3 +45,66 @@
   z-index: 10;
 }
 .pin-close-btn:hover { background: rgba(255,59,48,0.85); }
+
+/* ── Context menu ────────────────────────────────── */
+.pin-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.pin-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 162px;
+  background: rgba(28,28,30,0.96);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  padding: 4px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.pin-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  color: #e8e8e8;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.pin-menu-item:hover { background: rgba(255,255,255,0.1); }
+
+.pin-menu-danger { color: #ff6b6b; }
+.pin-menu-danger:hover { background: rgba(255,59,48,0.15); }
+
+.pin-menu-sep {
+  height: 1px;
+  background: rgba(255,255,255,0.1);
+  margin: 3px 0;
+}
+
+.pin-menu-opacity {
+  padding: 6px 12px 8px;
+}
+
+.pin-menu-opacity-label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+
+.pin-menu-slider {
+  width: 100%;
+  accent-color: #7b2ff7;
+  cursor: pointer;
+}

@@ -16,14 +16,18 @@ export default function Editor() {
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
   const [drawing, setDrawing] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const startPos = useRef({ x: 0, y: 0 });
+  // x/y = canvas natural coords (for annotation), screenX/screenY = area-relative px (for input overlay)
+  const [textPos, setTextPos] = useState<{ x: number; y: number; screenX: number; screenY: number } | null>(null);
+  const [flash, setFlash] = useState("");
   const textInputRef = useRef<HTMLInputElement>(null);
-  const [textPos, setTextPos] = useState<{ x: number; y: number } | null>(null);
 
-  const { tool, color, strokeWidth, annotations, setTool, setColor, setStrokeWidth,
-          addAnnotation, updateAnnotation, undo, reset } = useCaptureStore();
+  const {
+    tool, color, strokeWidth, annotations,
+    setTool, setColor, setStrokeWidth,
+    addAnnotation, updateAnnotation, undo, reset,
+  } = useCaptureStore();
 
-  // Load capture data from Rust
+  // ── Image load ──────────────────────────────────────────────────────────────
   useEffect(() => {
     invoke<string | null>("get_capture_data").then((data) => {
       if (!data) return;
@@ -37,38 +41,8 @@ export default function Editor() {
     });
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); undo(); }
-      if ((e.metaKey || e.ctrlKey) && e.key === "c") { e.preventDefault(); handleCopy(); }
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); handleSave(); }
-      if (e.key === "Escape") getCurrentWebviewWindow().close();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [annotations, imgData]);
-
-  // Re-render canvas whenever annotations change
-  useEffect(() => {
-    renderCanvas();
-  }, [annotations, imgSize]);
-
-  const renderCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    const img = imgRef.current;
-    if (!canvas || !img || imgSize.w === 0) return;
-
-    canvas.width = imgSize.w;
-    canvas.height = imgSize.h;
-    const ctx = canvas.getContext("2d")!;
-
-    ctx.drawImage(img, 0, 0);
-
-    annotations.forEach((a) => drawAnnotation(ctx, a));
-  }, [annotations, imgSize]);
-
-  const drawAnnotation = (ctx: CanvasRenderingContext2D, a: Annotation) => {
+  // ── Canvas render ───────────────────────────────────────────────────────────
+  const drawAnnotation = useCallback((ctx: CanvasRenderingContext2D, a: Annotation) => {
     ctx.save();
     ctx.strokeStyle = a.color;
     ctx.fillStyle = a.color;
@@ -80,10 +54,9 @@ export default function Editor() {
     const x2 = a.x2 ?? a.x, y2 = a.y2 ?? a.y;
 
     switch (a.type) {
-      case "rect": {
+      case "rect":
         ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
         break;
-      }
       case "circle": {
         const rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
         ctx.beginPath();
@@ -98,89 +71,101 @@ export default function Editor() {
         const angle = Math.atan2(dy, dx);
         const headLen = Math.min(20, len * 0.4);
         ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
+        ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
         ctx.lineTo(x2 - headLen * Math.cos(angle - 0.4), y2 - headLen * Math.sin(angle - 0.4));
         ctx.moveTo(x2, y2);
         ctx.lineTo(x2 - headLen * Math.cos(angle + 0.4), y2 - headLen * Math.sin(angle + 0.4));
         ctx.stroke();
         break;
       }
-      case "text": {
+      case "text":
         ctx.font = `${Math.max(16, a.strokeWidth * 6)}px -apple-system, sans-serif`;
         ctx.fillText(a.text ?? "", x1, y1);
         break;
-      }
       case "mosaic": {
         const bx = Math.min(x1, x2), by = Math.min(y1, y2);
         const bw = Math.abs(x2 - x1), bh = Math.abs(y2 - y1);
         if (bw < 2 || bh < 2) break;
-        const size = 12;
-        for (let px = bx; px < bx + bw; px += size) {
-          for (let py = by; py < by + bh; py += size) {
-            const d = ctx.getImageData(px + size / 2, py + size / 2, 1, 1).data;
+        const sz = 12;
+        for (let px = bx; px < bx + bw; px += sz) {
+          for (let py = by; py < by + bh; py += sz) {
+            const d = ctx.getImageData(px + sz / 2, py + sz / 2, 1, 1).data;
             ctx.fillStyle = `rgb(${d[0]},${d[1]},${d[2]})`;
-            ctx.fillRect(px, py, size, size);
+            ctx.fillRect(px, py, sz, sz);
           }
         }
         break;
       }
     }
     ctx.restore();
-  };
+  }, []);
 
-  const canvasToImg = (scale = 1): Promise<string> => {
-    return new Promise((resolve) => {
-      renderCanvas();
-      const canvas = canvasRef.current!;
-      if (scale === 1) { resolve(canvas.toDataURL("image/png").split(",")[1]); return; }
-      const out = document.createElement("canvas");
-      out.width = canvas.width * scale;
-      out.height = canvas.height * scale;
-      const ctx = out.getContext("2d")!;
-      ctx.scale(scale, scale);
-      ctx.drawImage(canvas, 0, 0);
-      resolve(out.toDataURL("image/png").split(",")[1]);
-    });
-  };
+  const renderCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    const img = imgRef.current;
+    if (!canvas || !img || imgSize.w === 0) return;
+    canvas.width = imgSize.w;
+    canvas.height = imgSize.h;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(img, 0, 0);
+    annotations.forEach((a) => drawAnnotation(ctx, a));
+  }, [annotations, imgSize, drawAnnotation]);
 
-  const handleCopy = async () => {
-    const b64 = await canvasToImg();
+  useEffect(() => { renderCanvas(); }, [renderCanvas]);
+
+  // ── Export helpers ──────────────────────────────────────────────────────────
+  const canvasToBase64 = useCallback((): string => {
+    renderCanvas();
+    return canvasRef.current!.toDataURL("image/png").split(",")[1];
+  }, [renderCanvas]);
+
+  const showFlash = useCallback((msg: string) => {
+    setFlash(msg);
+    setTimeout(() => setFlash(""), 1800);
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    const b64 = canvasToBase64();
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     await writeImage(bytes);
     showFlash("已复制到剪贴板");
-  };
+  }, [canvasToBase64, showFlash]);
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     const filePath = await save({
-      filters: [{ name: "PNG 图片", extensions: ["png"] },
-                 { name: "JPEG 图片", extensions: ["jpg"] }],
+      filters: [
+        { name: "PNG 图片", extensions: ["png"] },
+        { name: "JPEG 图片", extensions: ["jpg"] },
+      ],
       defaultPath: `截图_${Date.now()}.png`,
     });
     if (!filePath) return;
-    const data = await canvasToImg();
+    const data = canvasToBase64();
     await invoke("save_image", { path: filePath, data });
     showFlash("已保存");
-  };
+  }, [canvasToBase64, showFlash]);
 
-  const [flash, setFlash] = useState("");
-  const showFlash = (msg: string) => {
-    setFlash(msg);
-    setTimeout(() => setFlash(""), 1800);
-  };
+  // ── Keyboard shortcuts ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); undo(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "c") { e.preventDefault(); handleCopy(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); handleSave(); }
+      if (e.key === "Escape") getCurrentWebviewWindow().close();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, handleCopy, handleSave]);
 
-  // ── Canvas mouse events ───────────────────────────────────────────────────
-
+  // ── Canvas mouse events ─────────────────────────────────────────────────────
   const toCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top) * (canvas.height / rect.height),
     };
   };
 
@@ -188,12 +173,12 @@ export default function Editor() {
     if (tool === "pointer") return;
     if (tool === "text") {
       const { x, y } = toCanvasCoords(e);
-      setTextPos({ x, y });
+      const areaRect = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+      setTextPos({ x, y, screenX: e.clientX - areaRect.left, screenY: e.clientY - areaRect.top });
       setTimeout(() => textInputRef.current?.focus(), 50);
       return;
     }
     const { x, y } = toCanvasCoords(e);
-    startPos.current = { x, y };
     const id = `ann_${Date.now()}`;
     setActiveId(id);
     setDrawing(true);
@@ -206,41 +191,21 @@ export default function Editor() {
     updateAnnotation(activeId, { x2: x, y2: y });
   };
 
-  const onMouseUp = () => {
-    setDrawing(false);
-    setActiveId(null);
-  };
+  const onMouseUp = () => { setDrawing(false); setActiveId(null); };
 
   const submitText = (text: string) => {
     if (!textPos || !text.trim()) { setTextPos(null); return; }
-    addAnnotation({
-      id: `ann_${Date.now()}`, type: "text",
-      x: textPos.x, y: textPos.y,
-      text, color, strokeWidth,
-    });
+    addAnnotation({ id: `ann_${Date.now()}`, type: "text", x: textPos.x, y: textPos.y, text, color, strokeWidth });
     setTextPos(null);
   };
 
-  const canvasStyle: React.CSSProperties = {
-    maxWidth: "100%",
-    maxHeight: "100%",
-    objectFit: "contain",
-    cursor: tool === "pointer" ? "default" : "crosshair",
-    display: "block",
-  };
-
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="editor-root">
-      {/* ── Toolbar ─────────────────────────────────── */}
       <div className="editor-toolbar">
         <div className="toolbar-group">
-          {(["pointer","rect","circle","arrow","text","mosaic"] as ToolType[]).map((t) => (
-            <button
-              key={t}
-              className={`tool-btn ${tool === t ? "active" : ""}`}
-              title={toolLabel(t)}
-              onClick={() => setTool(t)}
-            >
+          {(["pointer", "rect", "circle", "arrow", "text", "mosaic"] as ToolType[]).map((t) => (
+            <button key={t} className={`tool-btn ${tool === t ? "active" : ""}`} title={toolLabel(t)} onClick={() => setTool(t)}>
               {toolIcon(t)}
             </button>
           ))}
@@ -250,12 +215,7 @@ export default function Editor() {
 
         <div className="toolbar-group">
           {COLORS.map((c) => (
-            <button
-              key={c}
-              className={`color-btn ${color === c ? "active" : ""}`}
-              style={{ background: c }}
-              onClick={() => setColor(c)}
-            />
+            <button key={c} className={`color-btn ${color === c ? "active" : ""}`} style={{ background: c }} onClick={() => setColor(c)} />
           ))}
         </div>
 
@@ -263,11 +223,7 @@ export default function Editor() {
 
         <div className="toolbar-group">
           {STROKE_WIDTHS.map((w) => (
-            <button
-              key={w}
-              className={`stroke-btn ${strokeWidth === w ? "active" : ""}`}
-              onClick={() => setStrokeWidth(w)}
-            >
+            <button key={w} className={`stroke-btn ${strokeWidth === w ? "active" : ""}`} onClick={() => setStrokeWidth(w)}>
               <div className="stroke-preview" style={{ height: w }} />
             </button>
           ))}
@@ -277,7 +233,7 @@ export default function Editor() {
 
         <div className="toolbar-group">
           <button className="action-btn" onClick={undo} title="撤销 ⌘Z">↩</button>
-          <button className="action-btn" onClick={reset} title="清空">⊘</button>
+          <button className="action-btn" onClick={reset} title="清空标注">⊘</button>
         </div>
 
         <div className="toolbar-spacer" />
@@ -290,13 +246,12 @@ export default function Editor() {
         </div>
       </div>
 
-      {/* ── Canvas area ─────────────────────────────── */}
       <div className="editor-canvas-area">
         {imgData ? (
           <>
             <canvas
               ref={canvasRef}
-              style={canvasStyle}
+              style={{ maxWidth: "100%", maxHeight: "100%", cursor: tool === "pointer" ? "default" : "crosshair", display: "block" }}
               onMouseDown={onMouseDown}
               onMouseMove={onMouseMove}
               onMouseUp={onMouseUp}
@@ -306,10 +261,7 @@ export default function Editor() {
               <input
                 ref={textInputRef}
                 className="text-input-overlay"
-                style={{
-                  left: textPos.x / (imgSize.w / (canvasRef.current?.getBoundingClientRect().width ?? imgSize.w)),
-                  top: (textPos.y / (imgSize.h / (canvasRef.current?.getBoundingClientRect().height ?? imgSize.h))) + 40,
-                }}
+                style={{ left: textPos.screenX, top: textPos.screenY }}
                 placeholder="输入文字，回车确认"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") submitText(e.currentTarget.value);
@@ -329,18 +281,12 @@ export default function Editor() {
   );
 }
 
-function toolLabel(t: ToolType) {
-  const labels: Record<ToolType, string> = {
-    pointer: "选择", rect: "矩形", circle: "椭圆",
-    arrow: "箭头", text: "文字", mosaic: "马赛克",
-  };
-  return labels[t];
+function toolLabel(t: ToolType): string {
+  const m: Record<ToolType, string> = { pointer: "选择", rect: "矩形", circle: "椭圆", arrow: "箭头", text: "文字", mosaic: "马赛克" };
+  return m[t];
 }
 
-function toolIcon(t: ToolType) {
-  const icons: Record<ToolType, string> = {
-    pointer: "↖", rect: "▭", circle: "◯",
-    arrow: "↗", text: "T", mosaic: "⬛",
-  };
-  return icons[t];
+function toolIcon(t: ToolType): string {
+  const m: Record<ToolType, string> = { pointer: "↖", rect: "▭", circle: "◯", arrow: "↗", text: "T", mosaic: "⬛" };
+  return m[t];
 }

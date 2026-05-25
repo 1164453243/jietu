@@ -66,11 +66,11 @@ GitHub Actions 会自动在以下环境各构建一次：
 
 | Secret 名 | 说明 |
 |-----------|------|
-| `WINDOWS_CERTIFICATE` | .pfx 证书的 base64 内容 |
+| `WINDOWS_CERTIFICATE` | .p[BUILD.md](BUILD.md)fx 证书的 base64 内容 |
 | `WINDOWS_CERTIFICATE_PASSWORD` | 证书密码 |
 
 ---
-
+[BUILD.md](BUILD.md)
 ## 版本更新流程
 
 1. 修改 `src-tauri/tauri.conf.json` 中的 `version`
