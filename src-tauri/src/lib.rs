@@ -1,3 +1,7 @@
+// objc 0.2's sel_impl macro uses #[cfg(cargo-clippy)] internally which
+// triggers unexpected_cfgs in Rust 1.80+. Allow it crate-wide.
+#![allow(unexpected_cfgs)]
+
 use std::sync::Mutex;
 use base64::{Engine as _, engine::general_purpose};
 use tauri::{
