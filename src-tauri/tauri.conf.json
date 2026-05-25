@@ -48,12 +48,28 @@
       "frameworks": [],
       "providerShortName": null,
       "signingIdentity": null,
-      "infoPlist": null
+      "infoPlist": null,
+      "dmg": {
+        "background": null,
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 170 },
+        "applicationFolderPosition": { "x": 480, "y": 170 }
+      }
     },
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
-    }
+      "timestampUrl": "",
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "displayLanguageSelector": false,
+        "installMode": "currentUser"
+      }
+    },
+    "resources": [],
+    "copyright": "© 2025 jietu",
+    "category": "Utility",
+    "shortDescription": "轻量截图工具",
+    "longDescription": "支持区域截图、全屏截图、标注、固定浮窗的跨平台轻量截图工具"
   }
 }
