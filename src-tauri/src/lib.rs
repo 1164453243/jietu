@@ -758,6 +758,7 @@ async fn open_pin_window(app: AppHandle, state: State<'_, AppState>) -> Result<(
         .always_on_top(true)
         .resizable(true)
         .skip_taskbar(false)
+        .accept_first_mouse(true)  // macOS: let first click drag/close without needing to focus first
         .build()
         .map_err(|e| e.to_string())?;
 
