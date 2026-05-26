@@ -107,14 +107,20 @@ fn raise_overlay_window_level(window: &tauri::WebviewWindow) {
         Ok(p) => p,
         Err(_) => return,
     };
-    let ns_win = ptr as *mut Object;
-    if ns_win.is_null() { return; }
-    unsafe {
-        // NSScreenSaverWindowLevel = 1000 — above Dock (20) and menu bar (24)
-        let _: () = msg_send![ns_win, setLevel: 1000_i64];
-        // NSWindowCollectionBehaviorCanJoinAllSpaces(1) | Transient(4) | IgnoresCycle(64)
-        let _: () = msg_send![ns_win, setCollectionBehavior: 69_u64];
-    }
+    // Convert to usize so it can be sent across threads (raw ptr is not Send)
+    let ptr_usize = ptr as usize;
+    if ptr_usize == 0 { return; }
+    // setLevel: MUST run on the main thread — calling it from a Tokio worker
+    // thread crashes with EXC_BAD_INSTRUCTION inside WindowServer.
+    let _ = window.run_on_main_thread(move || {
+        let ns_win = ptr_usize as *mut Object;
+        unsafe {
+            // NSScreenSaverWindowLevel = 1000 — above Dock (20) and menu bar (24)
+            let _: () = msg_send![ns_win, setLevel: 1000_i64];
+            // NSWindowCollectionBehaviorCanJoinAllSpaces(1) | Transient(4) | IgnoresCycle(64)
+            let _: () = msg_send![ns_win, setCollectionBehavior: 69_u64];
+        }
+    });
 }
 
 // ── macOS screen-capture permission ──────────────────────────────────────────
@@ -491,6 +497,7 @@ fn chrono_now_string() -> String {
     format!("{days:05}{h:02}{m:02}{sec:02}")
 }
 
+
 #[tauri::command]
 fn get_screenshot_history(state: State<'_, AppState>) -> Vec<ScreenshotRecord> {
     state.screenshot_history.lock().unwrap().clone()
@@ -559,11 +566,21 @@ async fn start_region_capture(app: AppHandle, state: State<'_, AppState>) -> Res
 
     // Capture window metadata and screenshot while screen is undisturbed
     let windows  = collect_window_list();
-    let snapshot = capture_primary_monitor()?;
+    let snapshot = match capture_primary_monitor() {
+        Ok(s) => s,
+        Err(e) => {
+            // Restore main window so the app doesn't appear to have crashed
+            if let Some(w) = app.get_webview_window("main") { let _ = w.show(); }
+            return Err(e);
+        }
+    };
 
     *state.window_list.lock().unwrap()    = windows;
     *state.screen_snapshot.lock().unwrap() = Some(snapshot.clone());
-    open_overlay_window(&app, &snapshot)?;
+    if let Err(e) = open_overlay_window(&app, &snapshot) {
+        if let Some(w) = app.get_webview_window("main") { let _ = w.show(); }
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -576,12 +593,21 @@ async fn start_fullscreen_capture(app: AppHandle, state: State<'_, AppState>) ->
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     let windows  = collect_window_list();
-    let snapshot = capture_primary_monitor()?;
+    let snapshot = match capture_primary_monitor() {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(w) = app.get_webview_window("main") { let _ = w.show(); }
+            return Err(e);
+        }
+    };
 
     *state.window_list.lock().unwrap()    = windows;
     *state.preselect_all.lock().unwrap()  = true;
     *state.screen_snapshot.lock().unwrap() = Some(snapshot.clone());
-    open_overlay_window(&app, &snapshot)?;
+    if let Err(e) = open_overlay_window(&app, &snapshot) {
+        if let Some(w) = app.get_webview_window("main") { let _ = w.show(); }
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -635,6 +661,11 @@ fn get_capture_data(state: State<'_, AppState>) -> Result<Option<String>, String
 #[tauri::command]
 async fn close_overlay(app: AppHandle) -> Result<(), String> {
     close_window(&app, "overlay");
+    // Always restore main window so the app doesn't appear to vanish
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
     Ok(())
 }
 
@@ -887,12 +918,24 @@ pub fn run() {
             screenshot_history: Mutex::new(vec![]),
         })
         .on_window_event(|window, event| {
-            // Hide main window to tray instead of closing it
-            if window.label() == "main" {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let _ = window.hide();
+            match window.label() {
+                "main" => {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
+                "overlay" => {
+                    // When the overlay is destroyed (ESC, copy, save, or crash),
+                    // always bring the main window back so the app isn't invisible.
+                    if let tauri::WindowEvent::Destroyed = event {
+                        if let Some(main) = window.app_handle().get_webview_window("main") {
+                            let _ = main.show();
+                            let _ = main.set_focus();
+                        }
+                    }
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -959,6 +1002,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = register_shortcuts(app.handle(), &config) {
         eprintln!("[jietu] hotkey register failed: {e}");
     }
+
 
     // ── System Tray ───────────────────────────────────────────────────────────
     let region_item  = MenuItem::with_id(app, "region",     "区域截图", true, None::<&str>)?;

@@ -19,7 +19,7 @@ npm run tauri build
 
 ```bash
 # 在 GitHub 网站新建仓库后：
-git remote add origin https://github.com/<你的用户名>/jietu.git
+git remote add origin https://github.com/1164453243/jietu.git
 git push -u origin main
 ```
 
