@@ -26,10 +26,9 @@ export default function Main() {
   useEffect(() => {
     invoke<boolean>("check_screen_capture_permission").then(setHasPermission);
     loadHistory();
-    const unlistenClose  = win.onCloseRequested((e) => { e.preventDefault(); win.hide(); });
-    // Refresh history instantly when a new screenshot is saved or one is deleted
-    const unlistenSaved  = listen("screenshot-saved",  () => loadHistory());
-    const unlistenDeleted = listen("history-changed",  () => loadHistory());
+    const unlistenClose   = win.onCloseRequested((e) => { e.preventDefault(); win.hide(); });
+    const unlistenSaved   = listen("screenshot-saved",  () => loadHistory());
+    const unlistenDeleted = listen("history-changed",   () => loadHistory());
     return () => {
       unlistenClose.then(f => f());
       unlistenSaved.then(f => f());
@@ -58,7 +57,7 @@ export default function Main() {
   };
 
   const handleDelayedCapture = useCallback((delaySecs: number) => {
-    if (countdown !== null) return; // already running
+    if (countdown !== null) return;
     let remaining = delaySecs;
     setCountdown(remaining);
     countdownRef.current = setInterval(() => {
@@ -98,9 +97,14 @@ export default function Main() {
 
   const formatTime = (ts: number) => {
     const d = new Date(ts * 1000);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
     const h = d.getHours().toString().padStart(2, "0");
     const m = d.getMinutes().toString().padStart(2, "0");
-    return `${h}:${m}`;
+    if (isToday) return `${h}:${m}`;
+    const mo = (d.getMonth()+1).toString().padStart(2,"0");
+    const day = d.getDate().toString().padStart(2,"0");
+    return `${mo}/${day} ${h}:${m}`;
   };
 
   return (
@@ -121,7 +125,7 @@ export default function Main() {
         {/* Permission warning */}
         {hasPermission === false && (
           <div className="perm-bar">
-            <span>⚠️</span>
+            <span className="perm-dot" />
             <span className="perm-bar-text">需要<strong>屏幕录制权限</strong>才能截取内容</span>
             <button className="perm-bar-btn" onClick={handleRequestPermission} disabled={requesting}>
               {requesting ? "…" : "授权"}
@@ -129,11 +133,11 @@ export default function Main() {
           </div>
         )}
 
-        {/* Countdown overlay */}
+        {/* Countdown */}
         {countdown !== null && (
           <div className="countdown-bar">
             <span className="countdown-num">{countdown}</span>
-            <span className="countdown-text">秒后截图</span>
+            <span className="countdown-text">秒后开始截图</span>
             <button className="countdown-cancel" onClick={cancelCountdown}>取消</button>
           </div>
         )}
@@ -142,7 +146,7 @@ export default function Main() {
         <div className="capture-row">
           <button className="capture-btn" onClick={() => handleCapture("start_region_capture")}>
             <div className="capture-btn-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
               </svg>
             </div>
@@ -152,7 +156,7 @@ export default function Main() {
 
           <button className="capture-btn" onClick={() => handleCapture("start_fullscreen_capture")}>
             <div className="capture-btn-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="3" width="20" height="14" rx="2"/>
                 <path d="M8 21h8M12 17v4"/>
               </svg>
@@ -162,9 +166,9 @@ export default function Main() {
           </button>
         </div>
 
-        {/* Delay capture row */}
+        {/* Delay row */}
         <div className="delay-row">
-          <span className="delay-label">延时截图：</span>
+          <span className="delay-label">延时截图</span>
           {[3, 5, 10].map((secs) => (
             <button
               key={secs}
@@ -172,7 +176,7 @@ export default function Main() {
               disabled={countdown !== null}
               onClick={() => handleDelayedCapture(secs)}
             >
-              {secs}秒
+              {secs}s
             </button>
           ))}
         </div>
@@ -181,7 +185,7 @@ export default function Main() {
         <div className="history-header">
           <span className="section-label">最近截图</span>
           {history.length > 0 && (
-            <button className="history-clear" onClick={handleClearHistory} title="清空历史">清空</button>
+            <button className="history-clear" onClick={handleClearHistory}>清空</button>
           )}
         </div>
 
@@ -190,7 +194,7 @@ export default function Main() {
             {history.map((item) => (
               <div
                 key={item.id}
-                className={`history-item ${copyingId === item.id ? "copying" : ""}`}
+                className={`history-item${copyingId === item.id ? " copying" : ""}`}
                 title={`${item.width}×${item.height}  ${formatTime(item.created_at)}`}
                 onClick={() => handleCopyHistory(item.id)}
               >
@@ -201,7 +205,7 @@ export default function Main() {
                   draggable={false}
                 />
                 <div className="history-time">{formatTime(item.created_at)}</div>
-                {copyingId === item.id && <div className="history-copied">已复制</div>}
+                {copyingId === item.id && <div className="history-copied">已复制 ✓</div>}
                 <button
                   className="history-delete"
                   title="删除"
@@ -214,7 +218,7 @@ export default function Main() {
           <div className="history-empty">
             <div className="history-empty-icon">🖼</div>
             <div>截图后将显示在这里</div>
-            <div className="history-empty-sub">点击缩略图可快速复制</div>
+            <div className="history-empty-sub">点击缩略图可快速复制到剪贴板</div>
           </div>
         )}
       </div>

@@ -26,51 +26,63 @@
   pointer-events: auto;
 }
 
+/* ── Crosshair coordinate tooltip ─────────────── */
 .overlay-tooltip {
   position: fixed;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: 12px;
-  padding: 3px 7px;
-  border-radius: 4px;
+  background: rgba(14,14,18,0.82);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.9);
+  font-size: 11.5px;
+  font-family: "SF Mono", "Consolas", monospace;
+  padding: 4px 9px;
+  border-radius: 7px;
   pointer-events: none;
   white-space: nowrap;
   z-index: 20;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
+/* ── Hint pill ─────────────────────────────────── */
 .overlay-hint {
   position: fixed;
-  bottom: 24px;
+  bottom: 28px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 13px;
-  padding: 6px 16px;
-  border-radius: 20px;
+  background: rgba(14,14,18,0.78);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.75);
+  font-size: 12.5px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  padding: 7px 18px;
+  border-radius: 24px;
   pointer-events: none;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
   z-index: 20;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
-/* ── Floating annotation toolbar ─────────────── */
+/* ── Floating annotation toolbar ──────────────── */
 .overlay-toolbar {
   position: fixed;
   z-index: 30;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 6px;
-  background: rgba(28, 28, 28, 0.97);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  animation: toolbar-in 0.1s ease forwards;
+  padding: 5px 7px;
+  background: rgba(20,20,24,0.95);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.65),
+              0 2px 8px rgba(0,0,0,0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: toolbar-in 0.14s cubic-bezier(0.34,1.56,0.64,1) forwards;
 }
 @keyframes toolbar-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .otb-group {
@@ -81,122 +93,167 @@
 
 .otb-sep {
   width: 1px;
-  height: 20px;
-  background: rgba(255, 255, 255, 0.15);
-  margin: 0 3px;
+  height: 18px;
+  background: rgba(255,255,255,0.1);
+  margin: 0 4px;
   flex-shrink: 0;
 }
 
+/* ── Tool buttons ─────────────────────────────── */
 .otb-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border: none;
-  border-radius: 5px;
+  border-radius: 7px;
   background: transparent;
-  color: #ccc;
+  color: #aaa;
   font-size: 13px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.1s ease;
   padding: 0;
   flex-shrink: 0;
 }
-.otb-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
-.otb-btn.active { background: rgba(24, 144, 255, 0.3); color: #60b8ff; }
+.otb-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  transform: scale(1.08);
+}
+.otb-btn:active { transform: scale(0.95); }
+.otb-btn.active {
+  background: rgba(123,47,247,0.22);
+  color: #b07eff;
+}
+.otb-btn.active:hover {
+  background: rgba(123,47,247,0.32);
+  color: #c8a0ff;
+}
 
+/* ── Stroke-width indicators ──────────────────── */
 .otb-stroke-preview {
   display: block;
   width: 14px;
-  background: #ccc;
+  background: #aaa;
   border-radius: 2px;
 }
-.otb-btn.active .otb-stroke-preview { background: #60b8ff; }
+.otb-btn.active .otb-stroke-preview { background: #b07eff; }
 
+.otb-stroke-dot {
+  display: block;
+  border-radius: 50%;
+  background: #aaa;
+  flex-shrink: 0;
+}
+.otb-btn.active .otb-stroke-dot { background: #b07eff; }
+
+/* ── Color swatches ───────────────────────────── */
 .otb-color {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   border: 2px solid transparent;
   cursor: pointer;
   padding: 0;
   flex-shrink: 0;
-  transition: border-color 0.12s, transform 0.12s;
+  transition: border-color 0.12s ease, transform 0.12s ease,
+              box-shadow 0.12s ease;
 }
-.otb-color:hover { transform: scale(1.15); }
-.otb-color.active { border-color: #fff; transform: scale(1.1); }
+.otb-color:hover {
+  transform: scale(1.18);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.otb-color.active {
+  border-color: rgba(255,255,255,0.9);
+  transform: scale(1.12);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
 
+/* ── Action buttons ───────────────────────────── */
 .otb-pin { font-size: 14px; }
+.otb-edit { font-size: 13px; }
 
 .otb-copy {
   width: auto;
-  padding: 0 9px;
-  background: #1677ff;
+  padding: 0 11px;
+  background: linear-gradient(135deg, #7b2ff7, #00c2e0);
   color: #fff;
   font-size: 12px;
   font-weight: 600;
+  border-radius: 7px;
+  box-shadow: 0 3px 10px rgba(123,47,247,0.35);
+  transition: opacity 0.14s ease, transform 0.12s ease, box-shadow 0.14s ease;
 }
-.otb-copy:hover { background: #0958d9; color: #fff; }
+.otb-copy:hover {
+  opacity: 0.9;
+  transform: scale(1.05);
+  box-shadow: 0 5px 16px rgba(123,47,247,0.5);
+  color: #fff;
+  background: linear-gradient(135deg, #7b2ff7, #00c2e0);
+}
+.otb-copy:active { transform: scale(0.97); opacity: 0.85; }
 
 .otb-save {
   width: auto;
-  padding: 0 9px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #ccc;
+  padding: 0 10px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #bbb;
   font-size: 12px;
 }
-.otb-save:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.otb-save:hover {
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+  border-color: rgba(255,255,255,0.18);
+}
 
-.otb-edit { font-size: 13px; }
-
-.otb-close { color: #aaa; }
-.otb-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.otb-close { color: #888; }
+.otb-close:hover { background: rgba(255,255,255,0.1); color: #ccc; }
 
 .otb-quit { color: #ff6b6b; }
-.otb-quit:hover { background: rgba(255, 59, 48, 0.2); color: #ff3b30; }
+.otb-quit:hover {
+  background: rgba(255,59,48,0.18);
+  color: #ff453a;
+  transform: scale(1.08);
+}
 
-/* Toast notification */
+/* ── Toast notification ─────────────────────── */
 .overlay-toast {
   position: fixed;
-  bottom: 60px;
+  bottom: 64px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: 13px;
-  padding: 6px 16px;
-  border-radius: 20px;
+  background: rgba(20,20,24,0.88);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.9);
+  font-size: 12.5px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  padding: 7px 18px;
+  border-radius: 24px;
   pointer-events: none;
   z-index: 40;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   animation: toast-in 0.15s ease;
 }
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-/* Stroke width dot */
-.otb-stroke-dot {
-  display: block;
-  border-radius: 50%;
-  background: #ccc;
-  flex-shrink: 0;
-}
-.otb-btn.active .otb-stroke-dot { background: #60b8ff; }
-
-/* Text input overlay */
+/* ── Text annotation input ───────────────────── */
 .overlay-text-input {
   position: fixed;
   z-index: 25;
   background: transparent;
   border: none;
-  border-bottom: 2px solid #1890ff;
+  border-bottom: 2px solid rgba(123,47,247,0.8);
   outline: none;
   color: #ff3b30;
   font-size: 18px;
   font-family: -apple-system, sans-serif;
   min-width: 120px;
   padding: 2px 0;
-  caret-color: #1890ff;
+  caret-color: #7b2ff7;
 }
