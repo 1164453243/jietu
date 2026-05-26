@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import Overlay from "./windows/overlay/Overlay";
 import Editor from "./windows/editor/Editor";
 import Settings from "./windows/settings/Settings";
@@ -9,7 +10,17 @@ import "./App.css";
 type WindowType = "overlay" | "editor" | "settings" | "pin" | "main";
 
 function getWindowType(): WindowType {
-  const hash = window.location.hash.replace("#", "").replace("/", "");
+  // Primary: detect by window label (works for all windows including dynamically created ones)
+  try {
+    const label = getCurrentWebviewWindow().label;
+    if (label === "overlay") return "overlay";
+    if (label === "editor") return "editor";
+    if (label === "settings") return "settings";
+    if (label.startsWith("pin_") || label === "pin") return "pin";
+    if (label === "main") return "main";
+  } catch (_) {}
+  // Fallback: hash-based detection
+  const hash = window.location.hash.replace(/^#\/?/, "");
   if (hash === "overlay") return "overlay";
   if (hash === "editor") return "editor";
   if (hash === "settings") return "settings";
@@ -18,12 +29,10 @@ function getWindowType(): WindowType {
 }
 
 export default function App() {
-  const [windowType, setWindowType] = useState<WindowType>(getWindowType());
+  const [windowType] = useState<WindowType>(getWindowType);
 
   useEffect(() => {
-    const handler = () => setWindowType(getWindowType());
-    window.addEventListener("hashchange", handler);
-    return () => window.removeEventListener("hashchange", handler);
+    // Hash changes are no longer used for routing (label-based), but keep listener for safety
   }, []);
 
   if (windowType === "overlay") return <Overlay />;

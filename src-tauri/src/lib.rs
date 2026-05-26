@@ -287,6 +287,17 @@ fn close_window(app: &AppHandle, label: &str) {
     }
 }
 
+/// Build a WebviewUrl that works in both dev and release builds.
+/// In release builds, Tauri's custom protocol serves from frontendDist.
+/// In debug builds built with plain `cargo build` (not `cargo tauri dev`),
+/// the custom protocol may not serve content; use the Vite dev server instead.
+fn app_url() -> WebviewUrl {
+    #[cfg(debug_assertions)]
+    { WebviewUrl::External("http://localhost:1420/".parse().unwrap()) }
+    #[cfg(not(debug_assertions))]
+    { WebviewUrl::App("/".into()) }
+}
+
 fn open_overlay_window(app: &AppHandle, snapshot: &ScreenSnapshot) -> Result<(), String> {
     // Destroy any existing overlay before creating a new one.
     // close() is async; hide first so it's invisible, then close.
@@ -301,7 +312,7 @@ fn open_overlay_window(app: &AppHandle, snapshot: &ScreenSnapshot) -> Result<(),
     let lx = snapshot.x as f64;
     let ly = snapshot.y as f64;
 
-    let w = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html#overlay".into()))
+    let w = WebviewWindowBuilder::new(app, "overlay", app_url())
         .transparent(true)
         .decorations(false)
         .always_on_top(true)
@@ -323,7 +334,7 @@ fn open_overlay_window(app: &AppHandle, snapshot: &ScreenSnapshot) -> Result<(),
 
 fn open_editor_window(app: &AppHandle) -> Result<(), String> {
     close_window(app, "editor");
-    WebviewWindowBuilder::new(app, "editor", WebviewUrl::App("index.html#editor".into()))
+    WebviewWindowBuilder::new(app, "editor", app_url())
         .inner_size(1000.0, 680.0)
         .min_inner_size(600.0, 400.0)
         .center()
@@ -496,6 +507,7 @@ fn chrono_now_string() -> String {
     let days = secs / 86400;
     format!("{days:05}{h:02}{m:02}{sec:02}")
 }
+
 
 
 #[tauri::command]
@@ -750,7 +762,7 @@ async fn open_pin_window(app: AppHandle, state: State<'_, AppState>) -> Result<(
     let label = format!("pin_{}", std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
 
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html#pin".into()))
+    let win = WebviewWindowBuilder::new(&app, label, app_url())
         .inner_size(win_w, win_h)
         .min_inner_size(80.0, 60.0)
         .transparent(true)
@@ -758,10 +770,59 @@ async fn open_pin_window(app: AppHandle, state: State<'_, AppState>) -> Result<(
         .always_on_top(true)
         .resizable(true)
         .skip_taskbar(false)
-        .accept_first_mouse(true)  // macOS: let first click drag/close without needing to focus first
+        .accept_first_mouse(true)
         .build()
         .map_err(|e| e.to_string())?;
 
+    // macOS: allow mouseMoved events on this window even when it's not the key window.
+    // Without this, hovering over a non-focused pin window produces no mousemove events,
+    // so React's onMouseEnter never fires and the close button never appears.
+    #[cfg(target_os = "macos")]
+    setup_pin_window_macos(&win);
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn setup_pin_window_macos(window: &tauri::WebviewWindow) {
+    use objc::{msg_send, sel, sel_impl, runtime::Object};
+    let ptr = match window.ns_window() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let ptr_usize = ptr as usize;
+    if ptr_usize == 0 { return; }
+    let _ = window.run_on_main_thread(move || {
+        let ns_win = ptr_usize as *mut Object;
+        unsafe {
+            // Allow mouseMoved events even when this window is not the key window,
+            // so React's onMouseEnter fires and the close button appears on hover.
+            let _: () = msg_send![ns_win, setAcceptsMouseMovedEvents: true];
+            // Native background drag — works even when the app is not frontmost.
+            let _: () = msg_send![ns_win, setMovableByWindowBackground: true];
+        }
+    });
+}
+
+/// Enable or disable native background drag on a pin window.
+/// Called from JS to disable drag while the opacity slider (in the context menu) is open,
+/// preventing the slider thumb drag from also moving the window.
+#[tauri::command]
+async fn set_pin_movable(app: AppHandle, label: String, movable: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc::{msg_send, sel, sel_impl, runtime::Object};
+        if let Some(window) = app.get_webview_window(&label) {
+            let ptr = window.ns_window().map_err(|e| e.to_string())? as usize;
+            if ptr == 0 { return Ok(()); }
+            window.run_on_main_thread(move || {
+                let ns_win = ptr as *mut Object;
+                unsafe { let _: () = msg_send![ns_win, setMovableByWindowBackground: movable]; }
+            }).map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = (app, label, movable); }
     Ok(())
 }
 
@@ -774,7 +835,7 @@ async fn open_settings(app: AppHandle) -> Result<(), String> {
         w.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("index.html#settings".into()))
+    WebviewWindowBuilder::new(&app, "settings", app_url())
         .inner_size(520.0, 480.0)
         .resizable(false)
         .center()
@@ -951,6 +1012,7 @@ pub fn run() {
             save_image,
             pin_from_overlay,
             open_pin_window,
+            set_pin_movable,
             open_settings,
             get_hotkey_config,
             check_shortcut_conflict,
@@ -1003,7 +1065,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = register_shortcuts(app.handle(), &config) {
         eprintln!("[jietu] hotkey register failed: {e}");
     }
-
 
     // ── System Tray ───────────────────────────────────────────────────────────
     let region_item  = MenuItem::with_id(app, "region",     "区域截图", true, None::<&str>)?;

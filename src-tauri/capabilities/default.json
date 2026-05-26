@@ -16,6 +16,14 @@
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
     "dialog:allow-save",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-start-dragging",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
   ]
 }

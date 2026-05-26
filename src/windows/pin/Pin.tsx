@@ -5,7 +5,6 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { PhysicalSize } from "@tauri-apps/api/dpi";
 import "./pin.css";
 
-
 interface MenuPos { x: number; y: number; }
 
 export default function Pin() {
@@ -53,12 +52,18 @@ export default function Pin() {
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     setMenuPos({ x: e.clientX, y: e.clientY });
+    // Disable native background drag while context menu (with slider) is open,
+    // so dragging the opacity slider doesn't also move the window.
+    invoke("set_pin_movable", { label: win.label, movable: false }).catch(() => {});
   };
 
-  const closeMenu = () => setMenuPos(null);
+  const closeMenu = useCallback(() => {
+    setMenuPos(null);
+    invoke("set_pin_movable", { label: win.label, movable: true }).catch(() => {});
+  }, [win.label]);
 
-  const handleClose = async () => {
-    await win.close();
+  const handleClose = () => {
+    win.close().catch(() => {});
   };
 
   const handleCopy = async () => {
@@ -100,27 +105,21 @@ export default function Pin() {
       onWheel={onWheel}
       onContextMenu={onContextMenu}
     >
-      {/* Drag region covers the whole window — sibling of buttons so clicks on
-          buttons don't fall inside this element and won't trigger native drag */}
-      <div className="pin-drag-layer" data-tauri-drag-region>
-        {imgData ? (
-          <img
-            src={`data:image/png;base64,${imgData}`}
-            className="pin-img"
-            draggable={false}
-            alt="pinned screenshot"
-          />
-        ) : (
-          <div className="pin-loading">…</div>
-        )}
-      </div>
+      {imgData ? (
+        <img
+          src={`data:image/png;base64,${imgData}`}
+          className="pin-img"
+          draggable={false}
+          alt="pinned screenshot"
+        />
+      ) : (
+        <div className="pin-loading">…</div>
+      )}
 
-      {/* Close button — sibling of drag layer, not inside it, so clicking
-          here never propagates into the drag region and triggers dragging */}
       {showClose && !menuPos && (
         <button
           className="pin-close-btn"
-          onClick={handleClose}
+          onMouseDown={(e) => { e.stopPropagation(); handleClose(); }}
           title="关闭"
         >
           ✕
@@ -155,7 +154,7 @@ export default function Pin() {
             <div className="pin-menu-sep" />
             <button
               className="pin-menu-item pin-menu-danger"
-              onClick={handleClose}
+              onMouseDown={(e) => { e.stopPropagation(); handleClose(); }}
             >
               关闭
             </button>
