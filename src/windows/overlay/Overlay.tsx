@@ -251,14 +251,15 @@ export default function Overlay() {
       ctx.strokeStyle = "#1677ff"; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, h);
       drawHandles(ctx, selHandles({x,y,w,h}));
       if (w > 40) {
-        const label = `${Math.round(w)} × ${Math.round(h)}`;
-        ctx.font = "12px -apple-system,sans-serif";
+        const scale = snapScaleRef.current;
+        const label = `${Math.round(w * scale)} × ${Math.round(h * scale)}`;
+        ctx.font = "bold 12px -apple-system,sans-serif";
         const lw = ctx.measureText(label).width;
         const lx = Math.min(Math.max(x+(w-lw-10)/2, 2), W-lw-12);
-        const ly = Math.min(y+h+18, H-4);
-        ctx.fillStyle = "rgba(0,0,0,0.65)";
-        ctx.beginPath(); ctx.roundRect(lx-4, ly-13, lw+14, 18, 3); ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.fillText(label, lx+3, ly);
+        const ly = Math.min(y+h+20, H-4);
+        ctx.fillStyle = "rgba(22,119,255,0.9)";
+        ctx.beginPath(); ctx.roundRect(lx-6, ly-14, lw+16, 20, 5); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.fillText(label, lx+2, ly);
       }
     } else if (!isDragging) {
       // Highlight hovered window to indicate it will be auto-selected on click
@@ -298,6 +299,19 @@ export default function Overlay() {
     ctx.clearRect(s.x, s.y, s.w, s.h);
     ctx.strokeStyle = "#1677ff"; ctx.lineWidth = 1.5; ctx.strokeRect(s.x, s.y, s.w, s.h);
     drawHandles(ctx, selHandles(s));
+    // Size badge in top-left of selection
+    if (s.w > 60) {
+      const scale = snapScaleRef.current;
+      const label = `${Math.round(s.w * scale)} × ${Math.round(s.h * scale)}`;
+      ctx.font = "bold 11px -apple-system,sans-serif";
+      const lw = ctx.measureText(label).width;
+      const bx = Math.max(s.x + 6, 4);
+      const by = s.y > 22 ? s.y - 6 : s.y + s.h + 6;
+      ctx.fillStyle = "rgba(0,0,0,0.75)";
+      ctx.beginPath(); ctx.roundRect(bx - 4, by - 13, lw + 12, 18, 4); ctx.fill();
+      ctx.fillStyle = "#aad4ff";
+      ctx.fillText(label, bx + 2, by);
+    }
   }, []);
 
   useEffect(() => {
@@ -711,7 +725,7 @@ export default function Overlay() {
     const TH = 40, TW = 500, GAP = 8;
     const left = Math.max(4, Math.min(x+(w-TW)/2, window.innerWidth-TW-4));
     const below = y+h+GAP;
-    const top = below+TH > window.innerHeight-4 ? Math.max(4, y-TH-GAP) : below;
+    const top = below+TH > window.innerHeight-4 ? Math.max(50, y-TH-GAP) : below;
     return { left, top };
   };
 
@@ -755,11 +769,11 @@ export default function Overlay() {
 
       {showTip && phase === "selecting" && (
         <div className="overlay-tooltip" style={{ left: tooltip.x+14, top: tooltip.y+14 }}>
-          {tooltip.w} × {tooltip.h}
+          {tooltip.w} × {tooltip.h} <span style={{opacity:0.6,fontSize:"10px"}}>px</span>
         </div>
       )}
 
-      {phase === "selecting" && <div className="overlay-hint">拖拽选择区域 · ESC 取消</div>}
+      {phase === "selecting" && <div className="overlay-hint">拖拽选择区域 · 点击选中窗口 · ESC 取消</div>}
 
       {phase === "editing" && frozenSel && (
         <div className="overlay-toolbar" style={tbStyle()}>

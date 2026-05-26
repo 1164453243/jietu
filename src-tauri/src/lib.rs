@@ -724,6 +724,26 @@ async fn copy_image_data(app: AppHandle, data: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Pin an image from the system clipboard as a floating pin window.
+#[tauri::command]
+async fn pin_from_clipboard(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let image = app.clipboard().read_image().map_err(|_| "剪贴板中没有图片".to_string())?;
+    let (w, h) = (image.width(), image.height());
+    let rgba = image.rgba().to_vec();
+    // Encode RGBA pixels as PNG
+    let mut png_buf = Vec::new();
+    {
+        use image::{ImageEncoder, codecs::png::PngEncoder};
+        PngEncoder::new(&mut png_buf)
+            .write_image(&rgba, w, h, image::ExtendedColorType::Rgba8)
+            .map_err(|e| e.to_string())?;
+    }
+    let b64 = general_purpose::STANDARD.encode(&png_buf);
+    *state.capture_data.lock().unwrap() = Some(b64);
+    open_pin_window(app, state).await
+}
+
 /// Called from the overlay toolbar — stores the annotated image and opens a pin window.
 #[tauri::command]
 async fn pin_from_overlay(
@@ -1011,6 +1031,7 @@ pub fn run() {
             close_overlay,
             save_image,
             pin_from_overlay,
+            pin_from_clipboard,
             open_pin_window,
             set_pin_movable,
             open_settings,
@@ -1067,12 +1088,13 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // ── System Tray ───────────────────────────────────────────────────────────
-    let region_item  = MenuItem::with_id(app, "region",     "区域截图", true, None::<&str>)?;
-    let full_item    = MenuItem::with_id(app, "fullscreen", "全屏截图", true, None::<&str>)?;
-    let settings_item = MenuItem::with_id(app, "settings",  "设置",     true, None::<&str>)?;
-    let quit_item    = MenuItem::with_id(app, "quit",       "退出",     true, None::<&str>)?;
+    let region_item  = MenuItem::with_id(app, "region",      "区域截图",     true, None::<&str>)?;
+    let full_item    = MenuItem::with_id(app, "fullscreen",  "全屏截图",     true, None::<&str>)?;
+    let clip_pin_item = MenuItem::with_id(app, "clip_pin",  "剪贴板钉图",   true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app, "settings",  "设置",         true, None::<&str>)?;
+    let quit_item    = MenuItem::with_id(app, "quit",        "退出",         true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&region_item, &full_item, &settings_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&region_item, &full_item, &clip_pin_item, &settings_item, &quit_item])?;
 
     let ah = app.handle().clone();
     TrayIconBuilder::new()
@@ -1092,6 +1114,12 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     tauri::async_runtime::spawn(async move {
                         let s = app.state::<AppState>();
                         let _ = start_fullscreen_capture(app.clone(), s).await;
+                    });
+                }
+                "clip_pin" => {
+                    tauri::async_runtime::spawn(async move {
+                        let s = app.state::<AppState>();
+                        let _ = pin_from_clipboard(app.clone(), s).await;
                     });
                 }
                 "settings" => {

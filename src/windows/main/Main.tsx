@@ -211,12 +211,16 @@ export default function Main() {
             ))}
           </div>
         ) : (
-          <div className="history-empty">截图后将在此显示缩略图</div>
+          <div className="history-empty">
+            <div className="history-empty-icon">🖼</div>
+            <div>截图后将显示在这里</div>
+            <div className="history-empty-sub">点击缩略图可快速复制</div>
+          </div>
         )}
       </div>
 
       <div className="main-footer">
-        点击 <strong>✕</strong> 最小化到菜单栏 · <kbd>Esc</kbd> 取消截图
+        关闭窗口后仍在菜单栏运行 · <kbd>Esc</kbd> 可取消截图
       </div>
     </div>
   );

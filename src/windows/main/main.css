@@ -410,9 +410,22 @@
 .history-delete:hover { background: rgba(255,59,48,0.85); }
 
 .history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   text-align: center;
-  color: #444;
-  font-size: 12px;
-  padding: 24px 0;
+  color: #555;
+  font-size: 12.5px;
+  padding: 28px 0 16px;
   flex: 1;
+}
+.history-empty-icon {
+  font-size: 28px;
+  opacity: 0.4;
+  margin-bottom: 2px;
+}
+.history-empty-sub {
+  font-size: 11px;
+  color: #3a3a3c;
 }

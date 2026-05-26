@@ -9,12 +9,13 @@ interface MenuPos { x: number; y: number; }
 
 export default function Pin() {
   const [imgData, setImgData] = useState<string | null>(null);
-  const [showClose, setShowClose] = useState(false);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
   const [opacity, setOpacity] = useState(100);
   const [copying, setCopying] = useState(false);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sizeHint, setSizeHint] = useState<string | null>(null);
+  const [grabbing, setGrabbing] = useState(false);
   const imgSize = useRef<{ w: number; h: number } | null>(null);
+  const sizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const win = getCurrentWebviewWindow();
 
   useEffect(() => {
@@ -25,16 +26,12 @@ export default function Pin() {
       img.onload = () => { imgSize.current = { w: img.naturalWidth, h: img.naturalHeight }; };
       img.src = `data:image/png;base64,${data}`;
     });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") win.close().catch(() => {});
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
-
-  const onMouseEnter = () => {
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    setShowClose(true);
-  };
-
-  const onMouseLeave = () => {
-    hideTimer.current = setTimeout(() => setShowClose(false), 800);
-  };
 
   const onWheel = async (e: React.WheelEvent) => {
     e.preventDefault();
@@ -47,13 +44,14 @@ export default function Pin() {
     nw = Math.max(80, Math.min(1600, nw));
     nh = Math.max(60, Math.min(1200, nh));
     await win.setSize(new PhysicalSize(nw, nh));
+    if (sizeTimer.current) clearTimeout(sizeTimer.current);
+    setSizeHint(`${nw} × ${nh} px`);
+    sizeTimer.current = setTimeout(() => setSizeHint(null), 1500);
   };
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     setMenuPos({ x: e.clientX, y: e.clientY });
-    // Disable native background drag while context menu (with slider) is open,
-    // so dragging the opacity slider doesn't also move the window.
     invoke("set_pin_movable", { label: win.label, movable: false }).catch(() => {});
   };
 
@@ -95,15 +93,20 @@ export default function Pin() {
   }, []);
 
   const menuLeft = menuPos ? Math.min(menuPos.x, window.innerWidth - 180) : 0;
-  const menuTop  = menuPos ? Math.min(menuPos.y, window.innerHeight - 210) : 0;
+  const menuTop  = menuPos ? Math.min(menuPos.y, window.innerHeight - 220) : 0;
 
   return (
     <div
-      className="pin-root"
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
+      className={`pin-root${grabbing ? " grabbing" : ""}`}
       onWheel={onWheel}
       onContextMenu={onContextMenu}
+      onMouseDown={(e) => {
+        if (e.button !== 0) return;
+        const t = e.target as HTMLElement;
+        if (t.closest("button") || t.closest("input") || t.closest(".pin-menu")) return;
+        setGrabbing(true);
+      }}
+      onMouseUp={() => setGrabbing(false)}
     >
       {imgData ? (
         <img
@@ -116,15 +119,15 @@ export default function Pin() {
         <div className="pin-loading">…</div>
       )}
 
-      {showClose && !menuPos && (
-        <button
-          className="pin-close-btn"
-          onMouseDown={(e) => { e.stopPropagation(); handleClose(); }}
-          title="关闭"
-        >
-          ✕
-        </button>
-      )}
+      <button
+        className="pin-close-btn"
+        onMouseDown={(e) => { e.stopPropagation(); handleClose(); }}
+        title="关闭"
+      >
+        ✕
+      </button>
+
+      {sizeHint && <div className="pin-size-hint">{sizeHint}</div>}
 
       {menuPos && (
         <>
