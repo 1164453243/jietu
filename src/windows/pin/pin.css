@@ -3,9 +3,18 @@
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  cursor: move;
   user-select: none;
   background: transparent;
+}
+
+/* Native drag region — covers the whole window. Buttons are siblings (not
+   children) so mousedown on a button doesn't fall inside this element and
+   won't trigger the Tauri drag handler. */
+.pin-drag-layer {
+  position: absolute;
+  inset: 0;
+  cursor: move;
+  z-index: 0;
 }
 
 .pin-img {
