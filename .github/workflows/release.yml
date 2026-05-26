@@ -4,10 +4,10 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:      # 允许手动触发
+  workflow_dispatch:
 
 permissions:
-  contents: write         # 需要写权限才能创建 Release
+  contents: write
 
 jobs:
   build:
@@ -16,9 +16,9 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: '--target aarch64-apple-darwin'   # Apple Silicon
+            args: '--target aarch64-apple-darwin'
           - platform: macos-latest
-            args: '--target x86_64-apple-darwin'    # Intel Mac
+            args: '--target x86_64-apple-darwin'
           - platform: windows-latest
             args: ''
 
@@ -31,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 'lts/*'
           cache: 'npm'
 
       - name: Install Rust stable
@@ -45,30 +45,28 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Check Rust (diagnostic)
+        shell: bash
+        working-directory: src-tauri
+        run: cargo check ${{ matrix.args }}
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS 签名（可选，没有则跳过公证）
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: '截图工具 ${{ github.ref_name }}'
+          releaseName: 'jietu ${{ github.ref_name }}'
           releaseBody: |
-            ## 更新内容
-            请查看提交记录。
+            ## Changes
+            See commit history for details.
 
-            ## 下载
+            ## Downloads
             - **macOS Apple Silicon**: `jietu_*_aarch64.dmg`
             - **macOS Intel**: `jietu_*_x64.dmg`
-            - **Windows**: `jietu_*_x64-setup.exe` 或 `jietu_*_x64_en-US.msi`
+            - **Windows**: `jietu_*_x64-setup.exe` or `jietu_*_x64_en-US.msi`
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
